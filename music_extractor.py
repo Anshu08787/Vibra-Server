@@ -445,11 +445,21 @@ class MusicExtractor:
         except (ValueError, TypeError, IndexError):
             return None
     
-    def get_playlist_info(self, playlist_url, max_results=50):
-        """Extract songs from a playlist using yt-dlp"""
+    def get_playlist_info(self, playlist_url, max_results=50, page=None, page_size=None, fetch_all=False):
+        """Extract songs from a playlist using yt-dlp with optional pagination."""
         try:
             ydl_opts = self.ydl_opts.copy()
-            ydl_opts['playlistend'] = max_results
+
+            if fetch_all:
+                # Do not set playlist bounds when full playlist is requested.
+                pass
+            elif page is not None and page_size is not None:
+                start_index = ((page - 1) * page_size) + 1
+                end_index = start_index + page_size - 1
+                ydl_opts['playliststart'] = start_index
+                ydl_opts['playlistend'] = end_index
+            else:
+                ydl_opts['playlistend'] = max_results
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 playlist_info = ydl.extract_info(playlist_url, download=False)
@@ -468,24 +478,45 @@ class MusicExtractor:
                     'id': playlist_info.get('id'),
                     'uploader': playlist_info.get('uploader'),
                     'description': playlist_info.get('description', ''),
+                    'thumbnail': self._get_high_quality_thumbnail(playlist_info.get('thumbnails')),
+                    'total_tracks': playlist_info.get('playlist_count', len(songs)),
                     'entry_count': len(songs),
-                    'songs': songs
+                    'songs': songs,
+                    'source': 'yt-dlp',
+                    'pagination': {
+                        'page': page,
+                        'page_size': page_size,
+                        'has_more': bool(page and page_size and len(songs) == page_size),
+                        'mode': 'full' if fetch_all else ('paged' if page and page_size else 'limited')
+                    }
                 }
                 
         except Exception as e:
             logger.error(f"Error getting playlist info: {str(e)}")
             return None
             
-    def get_ytmusic_playlist(self, playlist_id, max_results=50):
-        """Get playlist information using ytmusicapi"""
+    def get_ytmusic_playlist(self, playlist_id, max_results=50, page=None, page_size=None, fetch_all=False):
+        """Get playlist information using ytmusicapi with optional pagination."""
         try:
             if not self.ytmusic:
                 logger.warning("YTMusic API not available, falling back to yt-dlp")
                 playlist_url = f"https://music.youtube.com/playlist?list={playlist_id}"
-                return self.get_playlist_info(playlist_url, max_results)
+                return self.get_playlist_info(
+                    playlist_url,
+                    max_results=max_results,
+                    page=page,
+                    page_size=page_size,
+                    fetch_all=fetch_all
+                )
+
+            requested_limit = max_results
+            if fetch_all:
+                requested_limit = None
+            elif page is not None and page_size is not None:
+                requested_limit = page * page_size
             
             # Get playlist information from YTMusic API
-            playlist_data = self.ytmusic.get_playlist(playlist_id, max_results)
+            playlist_data = self.ytmusic.get_playlist(playlist_id, requested_limit)
             
             if not playlist_data or 'tracks' not in playlist_data:
                 logger.warning(f"No playlist data found for ID: {playlist_id}")
@@ -493,10 +524,29 @@ class MusicExtractor:
             
             # Process tracks
             songs = []
-            for track in playlist_data.get('tracks', [])[:max_results]:
+            tracks = playlist_data.get('tracks', [])
+
+            if fetch_all:
+                selected_tracks = tracks
+            elif page is not None and page_size is not None:
+                start_index = (page - 1) * page_size
+                end_index = start_index + page_size
+                selected_tracks = tracks[start_index:end_index]
+            else:
+                selected_tracks = tracks[:max_results]
+
+            for track in selected_tracks:
                 song_info = self._convert_ytmusic_to_standard(track)
                 if song_info:
                     songs.append(song_info)
+
+            total_tracks = playlist_data.get('trackCount', len(tracks))
+
+            has_more = False
+            next_page = None
+            if page is not None and page_size is not None:
+                has_more = (page * page_size) < total_tracks
+                next_page = page + 1 if has_more else None
             
             # Return formatted playlist information
             return {
@@ -506,17 +556,30 @@ class MusicExtractor:
                 'description': playlist_data.get('description', ''),
                 'thumbnail': self._get_high_quality_thumbnail(playlist_data.get('thumbnails')),
                 'year': playlist_data.get('year'),
-                'total_tracks': playlist_data.get('trackCount', len(songs)),
+                'total_tracks': total_tracks,
                 'entry_count': len(songs),
                 'songs': songs,
-                'source': 'ytmusicapi'
+                'source': 'ytmusicapi',
+                'pagination': {
+                    'page': page,
+                    'page_size': page_size,
+                    'has_more': has_more,
+                    'next_page': next_page,
+                    'mode': 'full' if fetch_all else ('paged' if page and page_size else 'limited')
+                }
             }
                 
         except Exception as e:
             logger.error(f"Error getting playlist info with YTMusic API: {str(e)}")
             # Fallback to traditional method if YTMusic API fails
             playlist_url = f"https://music.youtube.com/playlist?list={playlist_id}"
-            return self.get_playlist_info(playlist_url, max_results)
+            return self.get_playlist_info(
+                playlist_url,
+                max_results=max_results,
+                page=page,
+                page_size=page_size,
+                fetch_all=fetch_all
+            )
             
     def get_trending_by_country(self, country_code='US', max_results=50):
         """Get trending playlists by country using ytmusicapi"""

@@ -35,6 +35,7 @@ def home():
             '/search': 'Search for songs (GET) - ?q=query&limit=10',
             '/audio/<video_id>': 'Get audio URL for video ID (GET)',
             '/ytdlp': 'Extract song data using yt-dlp with cookie authentication (GET) - ?url=video_url',
+            '/playlist/<playlist_id>': 'Get playlist tracks (GET) - ?limit=50 or ?page=1&page_size=50 or ?all=true',
             '/recommended/<video_id>': 'Get recommended songs for a video ID (GET) - ?limit=50',
             '/trending/<country_code>': 'Get trending playlists by country code (GET) - ?limit=50',
             '/homepage': 'Get YouTube homepage/trending data (GET) - ?limit=20',
@@ -45,6 +46,8 @@ def home():
             'audio': '/audio/dQw4w9WgXcQ',
             'ytdlp': '/ytdlp?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ',
             'playlist_id': '/playlist/PLiJ19Xxebz3nkJ7Rg1vgHzu-nSLmSig7t?limit=20',
+            'playlist_paged': '/playlist/PLiJ19Xxebz3nkJ7Rg1vgHzu-nSLmSig7t?page=2&page_size=25',
+            'playlist_full': '/playlist/PLiJ19Xxebz3nkJ7Rg1vgHzu-nSLmSig7t?all=true',
             'recommended': '/recommended/dQw4w9WgXcQ?limit=20',
             'trending': '/trending/IN?limit=50 (country codes: US, IN, GB, etc.)',
             'homepage': '/homepage?limit=20'
@@ -186,11 +189,30 @@ def health_check():
 
 @app.route('/playlist/<playlist_id>', methods=['GET'])
 def get_ytmusic_playlist(playlist_id):
-    """Get playlist details by ID using YTMusic API"""
+    """Get playlist details by ID using YTMusic API with limit, page/page_size, or full mode."""
     max_results = request.args.get('limit', 50, type=int)
-    
-    if max_results > Config.MAX_SEARCH_RESULTS:
+    page = request.args.get('page', type=int)
+    page_size = request.args.get('page_size', type=int)
+
+    full_param = request.args.get('all', 'false').strip().lower()
+    fetch_all = full_param in ('1', 'true', 'yes', 'y')
+
+    if max_results and max_results > Config.MAX_SEARCH_RESULTS:
         max_results = Config.MAX_SEARCH_RESULTS
+
+    if page is not None and page < 1:
+        return jsonify({'error': 'Query parameter "page" must be >= 1'}), 400
+
+    if page_size is not None and page_size < 1:
+        return jsonify({'error': 'Query parameter "page_size" must be >= 1'}), 400
+
+    # Keep page size bounded to avoid expensive requests.
+    if page_size is not None and page_size > 200:
+        page_size = 200
+
+    # If only one of page/page_size is provided, treat it as invalid input.
+    if (page is None) ^ (page_size is None):
+        return jsonify({'error': 'Provide both "page" and "page_size" together'}), 400
     
     try:
         # Check if the input is a URL and extract playlist ID if so
@@ -200,8 +222,23 @@ def get_ytmusic_playlist(playlist_id):
                 return jsonify({'error': 'Invalid playlist URL'}), 400
             playlist_id = extracted_id
         
-        # Get playlist data using YTMusic API
-        playlist_info = music_extractor.get_ytmusic_playlist(playlist_id, max_results)
+        # Get playlist data with selected retrieval mode.
+        if fetch_all:
+            playlist_info = music_extractor.get_ytmusic_playlist(
+                playlist_id,
+                fetch_all=True
+            )
+        elif page is not None and page_size is not None:
+            playlist_info = music_extractor.get_ytmusic_playlist(
+                playlist_id,
+                page=page,
+                page_size=page_size
+            )
+        else:
+            playlist_info = music_extractor.get_ytmusic_playlist(
+                playlist_id,
+                max_results=max_results
+            )
         
         if playlist_info:
             return jsonify({
