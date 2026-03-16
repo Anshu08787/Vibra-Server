@@ -11,6 +11,7 @@ A powerful, fast, and free music API that provides access to YouTube Music data,
 
 - 🔍 **Fast Music Search** - Search for songs using YTMusic API for lightning-fast results
 - 🎧 **Audio Streaming** - Get direct audio URLs for any YouTube video/song
+- 🔗 **Runtime Playlist URLs** - Resolve YouTube mixes and generated playlists into song URLs
 - 📊 **Trending Music** - Get trending playlists by country code (50+ countries supported)
 - 🏠 **Homepage Data** - Access YouTube Music homepage and trending content  
 - 🎯 **Smart Recommendations** - Get related songs and recommendations for any track
@@ -147,6 +148,20 @@ curl "http://localhost:5000/audio/ktvTqknDobU"
   "audio_url": "https://example-audio-url.com/audio.mp3",
   "message": "Audio URL retrieved successfully"
 }
+```
+
+### 🔗 Runtime Playlist URLs
+Resolve a generated YouTube playlist or mix into the song URLs it currently contains.
+
+**Endpoint:** `GET /runtimeplaylist`
+
+**Parameters:**
+- `url` (required): Playlist, mix, or watch URL with a `list` parameter
+- `limit` (optional): Maximum number of tracks to resolve
+
+**Example:**
+```bash
+curl "http://localhost:5000/runtimeplaylist?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DktvTqknDobU%26list%3DRDktvTqknDobU&limit=25"
 ```
 
 ### 🏠 Homepage Data

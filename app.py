@@ -36,6 +36,7 @@ def home():
             '/audio/<video_id>': 'Get audio URL for video ID (GET)',
             '/ytdlp': 'Extract song data using yt-dlp with cookie authentication (GET) - ?url=video_url',
             '/playlist/<playlist_id>': 'Get playlist tracks (GET) - ?limit=50 or ?page=1&page_size=50 or ?all=true',
+            '/runtimeplaylist': 'Resolve YouTube generated/runtime playlist URLs into song URLs (GET) - ?url=playlist_or_mix_url',
             '/recommended/<video_id>': 'Get recommended songs for a video ID (GET) - ?limit=50',
             '/trending/<country_code>': 'Get trending playlists by country code (GET) - ?limit=50',
             '/homepage': 'Get YouTube homepage/trending data (GET) - ?limit=20',
@@ -48,6 +49,7 @@ def home():
             'playlist_id': '/playlist/PLiJ19Xxebz3nkJ7Rg1vgHzu-nSLmSig7t?limit=20',
             'playlist_paged': '/playlist/PLiJ19Xxebz3nkJ7Rg1vgHzu-nSLmSig7t?page=2&page_size=25',
             'playlist_full': '/playlist/PLiJ19Xxebz3nkJ7Rg1vgHzu-nSLmSig7t?all=true',
+            'runtimeplaylist': '/runtimeplaylist?url=https%3A%2F%2Fmusic.youtube.com%2Fplaylist%3Flist%3DRDKJwYBJMSbPI',
             'recommended': '/recommended/dQw4w9WgXcQ?limit=20',
             'trending': '/trending/IN?limit=50 (country codes: US, IN, GB, etc.)',
             'homepage': '/homepage?limit=20'
@@ -130,6 +132,50 @@ def extract_with_ytdlp():
         return jsonify({
             'success': False,
             'error': 'Internal server error during song extraction',
+            'message': str(e)
+        }), 500
+
+@app.route('/runtimeplaylist', methods=['GET'])
+def get_runtime_playlist_urls():
+    """Resolve generated YouTube playlists into canonical track URLs using yt-dlp."""
+    url = request.args.get('url', '').strip()
+    playlist_list_id = request.args.get('list', '').strip()
+    max_results = request.args.get('limit', type=int)
+
+    if not url:
+        return jsonify({'error': 'URL parameter is required'}), 400
+
+    if playlist_list_id and 'list=' not in url:
+        separator = '&' if '?' in url else '?'
+        url = f"{url}{separator}list={playlist_list_id}"
+
+    if max_results is not None and max_results < 1:
+        return jsonify({'error': 'Query parameter "limit" must be >= 1'}), 400
+
+    if max_results is not None and max_results > 500:
+        max_results = 500
+
+    try:
+        playlist_info = music_extractor.get_runtime_playlist_urls(url, max_results=max_results)
+
+        if playlist_info:
+            return jsonify({
+                'success': True,
+                'url': url,
+                'playlist': playlist_info,
+                'message': 'Runtime playlist URLs resolved successfully'
+            })
+
+        return jsonify({
+            'success': False,
+            'error': 'Could not resolve playlist tracks from the provided URL',
+            'message': 'Make sure the URL points to a valid YouTube playlist, mix, or generated radio.'
+        }), 404
+    except Exception as e:
+        logger.error(f"Runtime playlist extraction error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Internal server error during runtime playlist extraction',
             'message': str(e)
         }), 500
 

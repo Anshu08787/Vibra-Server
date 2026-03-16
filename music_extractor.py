@@ -2,6 +2,7 @@ import yt_dlp
 import logging
 import os
 import tempfile
+from urllib.parse import parse_qs, urlparse
 from ytmusicapi import YTMusic
 
 logger = logging.getLogger(__name__)
@@ -245,6 +246,54 @@ class MusicExtractor:
         except Exception as e:
             logger.warning(f"Could not extract playlist ID from URL {url}: {str(e)}")
             return None
+
+    def _build_youtube_watch_url(self, video_id):
+        """Build a canonical YouTube watch URL for a video ID."""
+        if not video_id:
+            return None
+        return f"https://www.youtube.com/watch?v={video_id}"
+
+    def _resolve_playlist_entry_url(self, entry):
+        """Resolve a playlist entry into a canonical watch URL when possible."""
+        if not entry or not isinstance(entry, dict):
+            return None
+
+        webpage_url = entry.get('webpage_url')
+        if webpage_url:
+            return webpage_url
+
+        entry_url = entry.get('url')
+        if not entry_url:
+            return self._build_youtube_watch_url(entry.get('id'))
+
+        parsed = urlparse(entry_url)
+        if parsed.scheme and parsed.netloc:
+            return entry_url
+
+        if entry_url.startswith('/watch'):
+            return f"https://www.youtube.com{entry_url}"
+
+        if entry_url.startswith('watch?'):
+            return f"https://www.youtube.com/{entry_url}"
+
+        return self._build_youtube_watch_url(entry.get('id') or entry_url)
+
+    def _looks_like_generated_playlist(self, playlist_url, playlist_info):
+        """Best-effort detection for YouTube generated playlists such as mixes and radios."""
+        list_id = None
+
+        if playlist_info and isinstance(playlist_info, dict):
+            list_id = playlist_info.get('id')
+
+        if not list_id and playlist_url:
+            parsed_url = urlparse(playlist_url)
+            list_id = parse_qs(parsed_url.query).get('list', [None])[0]
+
+        if not list_id:
+            return False
+
+        generated_prefixes = ('RD', 'UL', 'RDEM', 'RDAMVM', 'RDCLAK', 'OLAK5uy_')
+        return any(list_id.startswith(prefix) for prefix in generated_prefixes)
     
     def get_audio_url(self, video_id):
         """Get audio URL for a specific video ID using yt-dlp"""
@@ -493,6 +542,67 @@ class MusicExtractor:
                 
         except Exception as e:
             logger.error(f"Error getting playlist info: {str(e)}")
+            return None
+
+    def get_runtime_playlist_urls(self, playlist_url, max_results=None):
+        """Resolve runtime/generated YouTube playlists to track URLs using yt-dlp."""
+        try:
+            self._setup_cookies()
+
+            ydl_opts = self.ydl_opts.copy()
+            ydl_opts.update({
+                'extract_flat': 'in_playlist',
+                'skip_download': True,
+                'lazy_playlist': False,
+                'playlistend': max_results if max_results else None,
+            })
+
+            if ydl_opts.get('playlistend') is None:
+                ydl_opts.pop('playlistend', None)
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                playlist_info = ydl.extract_info(playlist_url, download=False)
+
+            if not playlist_info:
+                return None
+
+            entries = playlist_info.get('entries') or []
+            songs = []
+            song_urls = []
+
+            for index, entry in enumerate(entries, start=1):
+                if not entry:
+                    continue
+
+                song_url = self._resolve_playlist_entry_url(entry)
+                if not song_url:
+                    continue
+
+                songs.append({
+                    'position': index,
+                    'id': entry.get('id'),
+                    'title': entry.get('title', 'Unknown Title'),
+                    'url': song_url,
+                })
+                song_urls.append(song_url)
+
+            playlist_id = playlist_info.get('id') or self._extract_playlist_id_from_url(playlist_url)
+
+            return {
+                'title': playlist_info.get('title', 'Unknown Playlist'),
+                'id': playlist_id,
+                'playlist_url': playlist_url,
+                'generated': self._looks_like_generated_playlist(playlist_url, playlist_info),
+                'uploader': playlist_info.get('uploader'),
+                'thumbnail': self._get_high_quality_thumbnail(playlist_info.get('thumbnails')),
+                'total_tracks': playlist_info.get('playlist_count', len(song_urls)),
+                'entry_count': len(song_urls),
+                'song_urls': song_urls,
+                'songs': songs,
+                'source': 'yt-dlp'
+            }
+        except Exception as e:
+            logger.error(f"Error getting runtime playlist URLs: {str(e)}")
             return None
             
     def get_ytmusic_playlist(self, playlist_id, max_results=50, page=None, page_size=None, fetch_all=False):

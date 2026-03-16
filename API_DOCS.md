@@ -175,7 +175,50 @@ GET /homepage?limit=20
 }
 ```
 
-### 4. Trending by Country
+### 5. Runtime Playlist URLs
+**GET** `/runtimeplaylist`
+
+Resolve a YouTube generated playlist, mix, or radio URL into the individual song URLs inside it using yt-dlp.
+
+**Parameters:**
+- `url` (string, required): YouTube playlist, mix, or watch URL with a `list` parameter
+- `limit` (integer, optional): Maximum number of tracks to resolve (default: all available up to server cap)
+
+**Example Request:**
+```http
+GET /runtimeplaylist?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DktvTqknDobU%26list%3DRDktvTqknDobU&limit=25
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "url": "https://www.youtube.com/watch?v=ktvTqknDobU&list=RDktvTqknDobU",
+  "playlist": {
+    "title": "Mix - Radioactive",
+    "id": "RDktvTqknDobU",
+    "generated": true,
+    "total_tracks": 25,
+    "entry_count": 25,
+    "song_urls": [
+      "https://www.youtube.com/watch?v=ktvTqknDobU",
+      "https://www.youtube.com/watch?v=abc123"
+    ],
+    "songs": [
+      {
+        "position": 1,
+        "id": "ktvTqknDobU",
+        "title": "Radioactive",
+        "url": "https://www.youtube.com/watch?v=ktvTqknDobU"
+      }
+    ],
+    "source": "yt-dlp"
+  },
+  "message": "Runtime playlist URLs resolved successfully"
+}
+```
+
+### 6. Trending by Country
 **GET** `/trending/{country_code}`
 
 Get trending playlists for a specific country.
@@ -210,7 +253,7 @@ GET /trending/IN?limit=10
 }
 ```
 
-### 5. Recommendations
+### 7. Recommendations
 **GET** `/recommended/{video_id}`
 
 Get song recommendations based on a specific track.
@@ -244,7 +287,7 @@ GET /recommended/ktvTqknDobU?limit=10
 }
 ```
 
-### 6. Health Check
+### 8. Health Check
 **GET** `/health`
 
 Check API health and service status.
